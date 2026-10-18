@@ -89,11 +89,11 @@ def run_agent(user_message):
         parts = []
         for call in calls:
             print(f"[tool call] {call.name}({dict(call.args)})")
-            result = lookup_user(**call.args)
+            result = TOOL_FUNCTIONS[call.name](**call.args)
             parts.append(types.Part.from_function_response(
                 name=call.name, response={"result": result}
             ))
         contents.append(types.Content(role="user", parts=parts))
 
 if __name__ == "__main__":
-    print(run_agent("Hi, my email is alice@example.com and I can't log in. What's wrong?"))
+    print(run_agent("Hi, I'm alice@example.com. I can't log in. Which groups am I in, and please open a ticket for me."))
