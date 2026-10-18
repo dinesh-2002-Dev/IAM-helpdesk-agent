@@ -30,7 +30,7 @@ def create_ticket(email, summary):
     TICKETS.append({"id": ticket_id, "email": email, "summary": summary})
     return {"ticket_id": ticket_id, "status": "created"}
 
-# Tool description the LLM sees
+# Tool descriptions the LLM sees
 lookup_user_decl = {
     "name": "lookup_user",
     "description": "Look up an employee account by email. Returns account status and MFA method.",
@@ -40,8 +40,37 @@ lookup_user_decl = {
         "required": ["email"],
     },
 }
+check_group_decl = {
+    "name": "check_group_membership",
+    "description": "List the access groups an employee belongs to.",
+    "parameters": {
+        "type": "object",
+        "properties": {"email": {"type": "string", "description": "Employee email address"}},
+        "required": ["email"],
+    },
+}
+create_ticket_decl = {
+    "name": "create_ticket",
+    "description": "Create a support ticket for an employee with a short summary of the problem.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "email": {"type": "string", "description": "Employee email address"},
+            "summary": {"type": "string", "description": "Short description of the issue"},
+        },
+        "required": ["email", "summary"],
+    },
+}
+
+# Maps tool names to the real Python functions
+TOOL_FUNCTIONS = {
+    "lookup_user": lookup_user,
+    "check_group_membership": check_group_membership,
+    "create_ticket": create_ticket,
+}
+
 config = types.GenerateContentConfig(
-    tools=[types.Tool(function_declarations=[lookup_user_decl])]
+    tools=[types.Tool(function_declarations=[lookup_user_decl, check_group_decl, create_ticket_decl])]
 )
 
 def run_agent(user_message):
