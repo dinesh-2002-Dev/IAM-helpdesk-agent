@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 import random
 import time
 from google import genai
@@ -107,6 +109,19 @@ TOOL_FUNCTIONS = {
     "generate_temp_access_code": generate_temp_access_code,
 }
 
+def log_tool_call(name, args, result):
+    safe_result = dict(result)
+    if "temp_access_code" in safe_result:
+        safe_result["temp_access_code"] = "***masked***"  # never log secrets
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "tool": name,
+        "args": args,
+        "result": safe_result,
+    }
+    with open("audit.log", "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
 config = types.GenerateContentConfig(
     system_instruction=SYSTEM_PROMPT,
     tools=[types.Tool(function_declarations=[
@@ -151,6 +166,7 @@ def run_agent(user_message, contents):
         for call in calls:
             print(f"[tool call] {call.name}({dict(call.args)})")
             result = TOOL_FUNCTIONS[call.name](**call.args)
+            log_tool_call(call.name, dict(call.args), result)
             parts.append(types.Part.from_function_response(
                 name=call.name, response={"result": result}
             ))
