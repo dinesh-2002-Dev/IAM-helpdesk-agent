@@ -1,8 +1,17 @@
+import random
+import time
 from google import genai
 from google.genai import types
+from google.genai import errors
 
 client = genai.Client()  # reads GEMINI_API_KEY from the environment
-MODEL = "gemini-3.8-flash"
+MODEL = "gemini-3.8-flash"  # change this if you switch models
+
+SYSTEM_PROMPT = (
+    "You are an IAM helpdesk assistant. Use the tools to help employees. "
+    "Before issuing a temporary access code, you must ask the user for their employee ID. "
+    "Never guess or invent an employee ID."
+)
 
 # ---------- Mock data (fake, for the demo) ----------
 USERS = {
@@ -13,6 +22,11 @@ USERS = {
 GROUPS = {
     "alice@example.com": ["All-Employees", "VPN-Users"],
     "bob@example.com": ["All-Employees", "Finance-Team"],
+}
+
+EMPLOYEE_IDS = {
+    "alice@example.com": "E1001",
+    "bob@example.com": "E1002",
 }
 
 TICKETS = []
@@ -30,6 +44,16 @@ def create_ticket(email, summary):
     ticket_id = f"INC{1000 + len(TICKETS) + 1}"
     TICKETS.append({"id": ticket_id, "email": email, "summary": summary})
     return {"ticket_id": ticket_id, "status": "created"}
+
+def generate_temp_access_code(email, employee_id):
+    # Guardrail enforced in code: wrong or missing ID means no code
+    if EMPLOYEE_IDS.get(email) != employee_id:
+        return {"error": "identity verification failed"}
+    return {
+        "email": email,
+        "temp_access_code": f"TAP-{random.randint(100000, 999999)}",
+        "valid_minutes": 60,
+    }
 
 # ---------- Tool descriptions the LLM sees ----------
 lookup_user_decl = {
@@ -62,32 +86,67 @@ create_ticket_decl = {
         "required": ["email", "summary"],
     },
 }
+temp_code_decl = {
+    "name": "generate_temp_access_code",
+    "description": "Issue a temporary access code to an employee who has verified their identity with their employee ID.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "email": {"type": "string", "description": "Employee email address"},
+            "employee_id": {"type": "string", "description": "Employee ID provided by the user"},
+        },
+        "required": ["email", "employee_id"],
+    },
+}
 
 # Maps tool names to the real Python functions
 TOOL_FUNCTIONS = {
     "lookup_user": lookup_user,
     "check_group_membership": check_group_membership,
     "create_ticket": create_ticket,
+    "generate_temp_access_code": generate_temp_access_code,
 }
 
 config = types.GenerateContentConfig(
-    tools=[types.Tool(function_declarations=[lookup_user_decl, check_group_decl, create_ticket_decl])]
+    system_instruction=SYSTEM_PROMPT,
+    tools=[types.Tool(function_declarations=[
+        lookup_user_decl, check_group_decl, create_ticket_decl, temp_code_decl
+    ])],
 )
 
+# ---------- Calls the model, with retries for "server busy" errors ----------
+def call_model(contents):
+    for attempt in range(4):
+        try:
+            return client.models.generate_content(
+                model=MODEL, contents=contents, config=config
+            )
+        except errors.APIError as e:
+            if e.code == 503:
+                wait = 5 * (attempt + 1)
+                print(f"[model busy, retrying in {wait}s]")
+                time.sleep(wait)
+            elif e.code == 429:
+                raise RuntimeError(
+                    "Free-tier quota reached for this model. "
+                    "Wait for the reset or switch to another model."
+                )
+            else:
+                raise
+    raise RuntimeError("The model is still unavailable. Please try again later.")
+
 # ---------- The agent loop ----------
-def run_agent(user_message):
-    contents = [types.Content(role="user", parts=[types.Part(text=user_message)])]
+def run_agent(user_message, contents):
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
     while True:
-        response = client.models.generate_content(
-            model=MODEL, contents=contents, config=config
-        )
+        response = call_model(contents)
+        contents.append(response.candidates[0].content)
         calls = response.function_calls
         # No tool requested -> final answer
         if not calls:
             return response.text
 
         # Model asked for tools: run them and send the results back
-        contents.append(response.candidates[0].content)
         parts = []
         for call in calls:
             print(f"[tool call] {call.name}({dict(call.args)})")
@@ -99,10 +158,14 @@ def run_agent(user_message):
 
 if __name__ == "__main__":
     print("IAM Helpdesk Agent (type 'quit' to exit)")
+    history = []  # keeps the conversation so the agent remembers earlier messages
     while True:
         user_input = input("\nYou: ").strip()
         if user_input.lower() in ("quit", "exit"):
             break
         if not user_input:
             continue
-        print("\nAgent:", run_agent(user_input))
+        try:
+            print("\nAgent:", run_agent(user_input, history))
+        except RuntimeError as e:
+            print("\n[error]", e)
