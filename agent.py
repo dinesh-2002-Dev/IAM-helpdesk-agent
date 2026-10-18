@@ -98,4 +98,11 @@ def run_agent(user_message):
         contents.append(types.Content(role="user", parts=parts))
 
 if __name__ == "__main__":
-    print(run_agent("Hi, I'm alice@example.com. I can't log in. Which groups am I in, and please open a ticket for me."))
+    print("IAM Helpdesk Agent (type 'quit' to exit)")
+    while True:
+        user_input = input("\nYou: ").strip()
+        if user_input.lower() in ("quit", "exit"):
+            break
+        if not user_input:
+            continue
+        print("\nAgent:", run_agent(user_input))
