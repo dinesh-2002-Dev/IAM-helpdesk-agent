@@ -13,6 +13,23 @@ USERS = {
 def lookup_user(email):
     return USERS.get(email, {"error": "user not found"})
 
+GROUPS = {
+    "alice@example.com": ["All-Employees", "VPN-Users"],
+    "bob@example.com": ["All-Employees", "Finance-Team"],
+}
+
+def check_group_membership(email):
+    if email not in GROUPS:
+        return {"error": "user not found"}
+    return {"email": email, "groups": GROUPS[email]}
+
+TICKETS = []
+
+def create_ticket(email, summary):
+    ticket_id = f"INC{1000 + len(TICKETS) + 1}"
+    TICKETS.append({"id": ticket_id, "email": email, "summary": summary})
+    return {"ticket_id": ticket_id, "status": "created"}
+
 # Tool description the LLM sees
 lookup_user_decl = {
     "name": "lookup_user",
